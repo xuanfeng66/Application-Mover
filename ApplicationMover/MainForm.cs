@@ -1,4 +1,5 @@
-﻿using System;
+﻿using ApplicationMover.Properties;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -12,6 +13,47 @@ namespace ApplicationMover
         private NotifyIcon trayIcon;
         private ContextMenu trayMenu;
         private int indexOfLastMonitor;
+
+        public struct Rect
+        {
+            public int X;
+            public int Y;
+            public int Width;
+            public int Height;
+        }
+
+        public MainForm()
+        {
+            InitializeComponent();
+
+            trayMenu = new ContextMenu();
+            trayMenu.MenuItems.Add("Settings", OnMenuItemSettingsClicked);
+            trayMenu.MenuItems.Add("-");
+            trayMenu.MenuItems.Add("Exit", OnMenuItemExitClicked);
+
+            trayIcon = new NotifyIcon();
+            trayIcon.Text = "SystemTrayTestTwo";
+            trayIcon.Icon = new Icon(ApplicationMover.Properties.Resources.system_tray_icon, 40, 40);
+            trayIcon.MouseClick += trayIcon_MouseClick;
+            trayIcon.ContextMenu = trayMenu;
+            trayIcon.Visible = true;
+
+            comboBoxMoveWindowShortcuts.SelectedIndex = Settings.Default.ShortcutKeyIndex;
+
+            Visible = false;
+            trayIcon.Visible = true;
+            InitializeCurrentScreen();
+
+            RegisterHotKey(this.Handle, 0, 0, GetShortcutKey().GetHashCode());
+        }
+
+        private void MinimizeAndHideSettingsForm()
+        {
+            WindowState = FormWindowState.Minimized;
+            Visible = false;
+            ShowInTaskbar = false;
+            trayIcon.Visible = true;
+        }
 
         [DllImport("user32.dll", SetLastError = true)]
         public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int W, int H, uint uFlags);
@@ -30,44 +72,6 @@ namespace ApplicationMover
 
         [DllImport("user32.dll")]
         private static extern IntPtr GetForegroundWindow();
-
-        public MainForm()
-        {
-            InitializeComponent();
-
-            trayMenu = new ContextMenu();
-            trayMenu.MenuItems.Add("Settings", OnMenuItemSettingsClicked);
-            trayMenu.MenuItems.Add("-");
-            trayMenu.MenuItems.Add("Exit", OnMenuItemExitClicked);
-
-            trayIcon = new NotifyIcon();
-            trayIcon.Text = "SystemTrayTestTwo";
-            trayIcon.Icon = new Icon(SystemIcons.Hand, 40, 40);
-            trayIcon.MouseClick += trayIcon_MouseClick;
-            trayIcon.ContextMenu = trayMenu;
-            trayIcon.Visible = true;
-
-            MinimizeAndHideSettingsForm();
-            InitializeCurrentScreen();
-
-            RegisterHotKey(this.Handle, 0, 0, Keys.F6.GetHashCode());
-        }
-
-        private void MinimizeAndHideSettingsForm()
-        {
-            WindowState = FormWindowState.Minimized;
-            Visible = false;
-            ShowInTaskbar = false;
-            trayIcon.Visible = true;
-        }
-
-        public struct Rect
-        {
-            public int X;
-            public int Y;
-            public int Width;
-            public int Height;
-        }
 
         private void InitializeCurrentScreen()
         {
@@ -145,7 +149,7 @@ namespace ApplicationMover
                 Point newLocation = Screen.AllScreens[indexOfLastMonitor].WorkingArea.Location;
                 newLocation.Y = activeWindowRect.Y;
 
-                //! For some reason GetWindowRect() always returns -8 for position X for full-size applications...
+                //! Hack-alert: For some reason GetWindowRect() always returns -8 for position X for full-size applications...
                 if (activeWindowRect.X < -8)
                     newLocation.X = Screen.AllScreens[indexOfLastMonitor].Bounds.Width - (activeWindowRect.X * -1);
                 else
@@ -161,6 +165,42 @@ namespace ApplicationMover
         {
             e.Cancel = true;
             MinimizeAndHideSettingsForm();
+        }
+
+        private void buttonSave_Click(object sender, EventArgs e)
+        {
+            SaveSettings();
+            Close();
+        }
+
+        private void SaveSettings()
+        {
+            Settings.Default.ShortcutKeyIndex = comboBoxMoveWindowShortcuts.SelectedIndex;
+            Settings.Default.Save();
+
+            UnregisterHotKey(this.Handle, 0);
+            RegisterHotKey(this.Handle, 0, 0, GetShortcutKey().GetHashCode());
+        }
+
+        private Keys GetShortcutKey()
+        {
+            switch (comboBoxMoveWindowShortcuts.SelectedIndex)
+            {
+                case 0: return Keys.F1;
+                case 1: return Keys.F2;
+                case 2: return Keys.F3;
+                case 3: return Keys.F4;
+                case 4: return Keys.F5;
+                case 5: return Keys.F6;
+                case 6: return Keys.F7;
+                case 7: return Keys.F8;
+                case 8: return Keys.F9;
+                case 9: return Keys.F10;
+                case 10: return Keys.F11;
+                case 11: return Keys.F12;
+            }
+
+            return Keys.F6;
         }
     }
 }
