@@ -1,4 +1,16 @@
 Application-Mover
 =================
 
-Simple system tray application to attach a keyboard shortcut in order to move your selected application to the next monitor on the list. This started out as a project for myself to learn more about C# Handles and PInvokes (platform invokes) and was inspired by UltraMon (which is useless at Windows 8 because it already supports several taskbars). It turned out to be useless because Windows already has a shortcut key for it.
+自定义显示器最大化
+楼主4个显示器
+分别是
+1：1080*1920,
+2：1920*2160,
+3：1920*2160,
+4：1920*1080
+其中显示器2，3其实是一个大4k显示器
+F6切换显示器1最大化
+F7切换显示器2最大化
+F8切换显示器3最大化
+F9切换显示器4最大化
+F10切换合并显示器2，3最大化 2，3居中显示
