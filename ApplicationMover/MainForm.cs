@@ -1,10 +1,13 @@
 ﻿using ApplicationMover.Properties;
+using Microsoft.Win32;
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
+using System.Configuration;
 
 namespace ApplicationMover
 {
@@ -12,7 +15,9 @@ namespace ApplicationMover
     {
         private NotifyIcon trayIcon;
         private ContextMenu trayMenu;
-        private int indexOfLastMonitor;
+        private Hashtable positionMap = new Hashtable();
+        private Hashtable currentStateMap = new Hashtable();
+
 
         public struct Rect
         {
@@ -20,6 +25,33 @@ namespace ApplicationMover
             public int Y;
             public int Width;
             public int Height;
+        }
+
+        public struct CustomState
+        {
+            public FormWindowState state;
+            public ScreenIndex screenIndex;
+
+        }
+
+
+
+        //显示器  1,2,3,4,  2|3 = 5，  2|3 /2 = 6, 默认0
+        public enum ScreenIndex : int
+        {
+            NONE = 0,
+            S1 = 1,
+            S2 = 2,
+            S3 = 3,
+            S4 = 4,
+            S5 = 5,
+            S6 = 6
+        }
+
+        public struct State
+        {
+            public  Rect rect;
+            public FormWindowState state;
         }
 
         public MainForm()
@@ -32,28 +64,30 @@ namespace ApplicationMover
             trayMenu.MenuItems.Add("Exit", OnMenuItemExitClicked);
 
             trayIcon = new NotifyIcon();
-            trayIcon.Text = "SystemTrayTestTwo";
+            trayIcon.Text = "自定义窗口缩放";
             trayIcon.Icon = new Icon(ApplicationMover.Properties.Resources.system_tray_icon, 40, 40);
             trayIcon.MouseClick += trayIcon_MouseClick;
             trayIcon.ContextMenu = trayMenu;
             trayIcon.Visible = true;
 
-            comboBoxMoveWindowShortcuts.SelectedIndex = Settings.Default.ShortcutKeyIndex;
-
             Visible = false;
             trayIcon.Visible = true;
-            InitializeCurrentScreen();
 
-            RegisterHotKey(this.Handle, 0, 0, GetShortcutKey().GetHashCode());
+            SaveSettings();
         }
 
         private void MinimizeAndHideSettingsForm()
         {
+           // SaveSettings();
             WindowState = FormWindowState.Minimized;
             Visible = false;
             ShowInTaskbar = false;
             trayIcon.Visible = true;
+            SaveSettings();
         }
+
+
+        
 
         [DllImport("user32.dll", SetLastError = true)]
         public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int W, int H, uint uFlags);
@@ -73,23 +107,52 @@ namespace ApplicationMover
         [DllImport("user32.dll")]
         private static extern IntPtr GetForegroundWindow();
 
-        private void InitializeCurrentScreen()
+        [DllImport("user32.dll", CharSet = CharSet.Auto)]
+        public static extern int MoveWindow(IntPtr hWnd, int x, int y, int nWidth, int nHeight, bool BRePaint);
+
+        [DllImport("user32.dll", EntryPoint = "ShowWindow", CharSet = CharSet.Auto)]
+        public static extern int ShowWindow(IntPtr hwnd, int nCmdShow);
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static extern bool GetWindowPlacement(
+        IntPtr hWnd, ref WINDOWPLACEMENT lpwndpl);
+
+
+        [DllImport("user32.dll", EntryPoint = "GetParent", SetLastError = true)]
+        public static extern IntPtr GetParent(IntPtr hWnd);
+
+        [Serializable]
+        [StructLayout(LayoutKind.Sequential)]
+        internal struct WINDOWPLACEMENT
         {
-            Screen currentScreen = Screen.FromControl(this);
+            public int length;
+            public int flags;
+            public ShowWindowCommands showCmd;
+            public System.Drawing.Point ptMinPosition;
+            public System.Drawing.Point ptMaxPosition;
+            public System.Drawing.Rectangle rcNormalPosition;
+        }
 
-            for (int i = 0; i < Screen.AllScreens.Length; ++i)
-            {
-                if (Screen.AllScreens[i].DeviceName != currentScreen.DeviceName)
-                    continue;
+        internal enum ShowWindowCommands : int
+        {
+            Hide = 0,
+            Normal = 1,
+            Minimized = 2,
+            Maximized = 3,
+        }
 
-                indexOfLastMonitor = i;
-                break;
-            }
+        private static WINDOWPLACEMENT GetPlacement(IntPtr hwnd)
+        {
+            WINDOWPLACEMENT placement = new WINDOWPLACEMENT();
+            placement.length = Marshal.SizeOf(placement);
+            GetWindowPlacement(hwnd, ref placement);
+            return placement;
         }
 
         private void OnMenuItemExitClicked(object sender, EventArgs e)
         {
-            Close();
+            UnregisterHotKey(this.Handle, 0);
+            System.Environment.Exit(0);
         }
 
         private void OnMenuItemSettingsClicked(object sender, EventArgs e)
@@ -115,15 +178,211 @@ namespace ApplicationMover
             if (e.Button == MouseButtons.Right)
                 return;
 
-            OpenSettingsForm();
+           OpenSettingsForm();
         }
 
         private void OpenSettingsForm()
         {
-            WindowState = FormWindowState.Normal;
             Visible = true;
             ShowInTaskbar = true;
-            trayIcon.Visible = false;
+            WindowState = FormWindowState.Normal;
+            SaveSettings();
+        }
+
+        private void UpdateWindowsProfile(IntPtr activeWindow, WINDOWPLACEMENT placement, Rect activeWindowRect)
+        {
+            if (positionMap.ContainsKey(activeWindow))
+            {
+                return;
+            }
+                FormWindowState state = FormWindowState.Normal;
+            if (placement.showCmd == ShowWindowCommands.Normal)
+            {
+                state = FormWindowState.Normal;
+            }
+            else if (placement.showCmd == ShowWindowCommands.Maximized)
+            {
+                state = FormWindowState.Maximized;
+            }
+            else if (placement.showCmd == ShowWindowCommands.Minimized)
+            {
+                state = FormWindowState.Minimized;
+            }
+            State ss = new State();
+            ss.rect = activeWindowRect;
+            ss.state = state;
+            positionMap.Add(activeWindow, ss);
+          
+        }
+
+        private void RestWindows(IntPtr activeWindow)
+        {
+            if(positionMap.ContainsKey(activeWindow) && currentStateMap.ContainsKey(activeWindow))
+            {
+                State ss = (State)positionMap[activeWindow];
+                ShowWindow(activeWindow, ss.state == FormWindowState.Normal ? 1 : 3);
+                MoveWindow(activeWindow, ss.rect.X, ss.rect.Y, ss.rect.Width - ss.rect.X, ss.rect.Height - ss.rect.Y, true);
+                ShowWindow(activeWindow, ss.state == FormWindowState.Normal ? 1 : 3);
+                CustomState cs = new CustomState();
+                cs.state = ss.state;
+                cs.screenIndex = ScreenIndex.NONE;
+                currentStateMap[activeWindow] = cs;
+            }
+          
+        }
+
+        private void DealWithF6(IntPtr activeWindow, Rect activeWindowRect)
+        {
+            if (positionMap.ContainsKey(activeWindow) 
+                && currentStateMap.ContainsKey(activeWindow) 
+                && ((CustomState)currentStateMap[activeWindow]).screenIndex == ScreenIndex.S1
+                && ((CustomState)currentStateMap[activeWindow]).state == FormWindowState.Maximized)
+            {
+                RestWindows(activeWindow);  
+            }
+            else
+            {
+                MoveWindow(activeWindow, -1080, -76, 1080, 1880, true);
+                ShowWindow(activeWindow, 3);
+                CustomState cs = new CustomState();
+                cs.state = FormWindowState.Maximized;
+                cs.screenIndex = ScreenIndex.S1;
+                if (currentStateMap.ContainsKey(activeWindow))
+                {
+                    currentStateMap[activeWindow] = cs;
+                } else
+                {
+                    currentStateMap.Add(activeWindow, cs);
+                }
+            }
+        }
+
+        private void DealWithF7(IntPtr activeWindow, Rect activeWindowRect)
+        {
+            if (positionMap.ContainsKey(activeWindow)
+                && currentStateMap.ContainsKey(activeWindow)
+                && ((CustomState)currentStateMap[activeWindow]).screenIndex == ScreenIndex.S2
+                && ((CustomState)currentStateMap[activeWindow]).state == FormWindowState.Maximized)
+            {
+                RestWindows(activeWindow);
+            }
+            else
+            {
+                MoveWindow(activeWindow, 0, 0, 1920, 2120, true);
+                ShowWindow(activeWindow, 3);
+                CustomState cs = new CustomState();
+                cs.state = FormWindowState.Maximized;
+                cs.screenIndex = ScreenIndex.S2;
+                if (currentStateMap.ContainsKey(activeWindow))
+                {
+                    currentStateMap[activeWindow] = cs;
+                }
+                else
+                {
+                    currentStateMap.Add(activeWindow, cs);
+                }
+            }
+        }
+
+        private void DealWithF8(IntPtr activeWindow, Rect activeWindowRect)
+        {
+            if (positionMap.ContainsKey(activeWindow)
+                && currentStateMap.ContainsKey(activeWindow)
+                && ((CustomState)currentStateMap[activeWindow]).screenIndex == ScreenIndex.S3
+                && ((CustomState)currentStateMap[activeWindow]).state == FormWindowState.Maximized)
+            {
+                RestWindows(activeWindow);
+            }
+            else
+            {
+                MoveWindow(activeWindow, 1920, 0, 1920, 2120, true);
+                ShowWindow(activeWindow, 3);
+                CustomState cs = new CustomState();
+                cs.state = FormWindowState.Maximized;
+                cs.screenIndex = ScreenIndex.S3;
+                if (currentStateMap.ContainsKey(activeWindow))
+                {
+                    currentStateMap[activeWindow] = cs;
+                }
+                else
+                {
+                    currentStateMap.Add(activeWindow, cs);
+                }
+            }
+        }
+
+        private void DealWithF9(IntPtr activeWindow, Rect activeWindowRect)
+        {
+            if (positionMap.ContainsKey(activeWindow)
+                && currentStateMap.ContainsKey(activeWindow)
+                && ((CustomState)currentStateMap[activeWindow]).screenIndex == ScreenIndex.S4
+                && ((CustomState)currentStateMap[activeWindow]).state == FormWindowState.Maximized)
+            {
+                RestWindows(activeWindow);
+            }
+            else
+            {
+                MoveWindow(activeWindow, 3840, 0, 1920, 1040, true);
+                ShowWindow(activeWindow, 3);
+                CustomState cs = new CustomState();
+                cs.state = FormWindowState.Maximized;
+                cs.screenIndex = ScreenIndex.S4;
+                if (currentStateMap.ContainsKey(activeWindow))
+                {
+                    currentStateMap[activeWindow] = cs;
+                }
+                else
+                {
+                    currentStateMap.Add(activeWindow, cs);
+                }
+            }
+        }
+
+        //老的->S5->S6->老的 循环
+        private void DealWithF10(IntPtr activeWindow, Rect activeWindowRect)
+        {
+            if (positionMap.ContainsKey(activeWindow)
+                && currentStateMap.ContainsKey(activeWindow)
+                && ((CustomState)currentStateMap[activeWindow]).screenIndex == ScreenIndex.S6
+                && ((CustomState)currentStateMap[activeWindow]).state == FormWindowState.Normal)
+            {
+                RestWindows(activeWindow);
+            }
+            else if (positionMap.ContainsKey(activeWindow)
+                && currentStateMap.ContainsKey(activeWindow)
+                && ((CustomState)currentStateMap[activeWindow]).screenIndex == ScreenIndex.S5
+                && ((CustomState)currentStateMap[activeWindow]).state == FormWindowState.Normal)
+            {
+                ShowWindow(activeWindow, 1);
+                MoveWindow(activeWindow, 960, 540, 1920, 1080, true);
+                CustomState cs = new CustomState();
+                cs.state = FormWindowState.Normal;
+                cs.screenIndex = ScreenIndex.S6;
+                if (currentStateMap.ContainsKey(activeWindow))
+                {
+                    currentStateMap[activeWindow] = cs;
+                }
+                else
+                {
+                    currentStateMap.Add(activeWindow, cs);
+                }
+            }
+            else
+            {
+                ShowWindow(activeWindow, 1);
+                MoveWindow(activeWindow, 0, 0, 3840, 2120, true);
+                CustomState cs = new CustomState();
+                cs.state = FormWindowState.Normal;
+                cs.screenIndex = ScreenIndex.S5;
+                if (currentStateMap.ContainsKey(activeWindow))
+                {
+                    currentStateMap[activeWindow] = cs;
+                }
+                else
+                {
+                    currentStateMap.Add(activeWindow, cs);
+                }
+            }
         }
 
         protected override void WndProc(ref Message m)
@@ -137,25 +396,48 @@ namespace ApplicationMover
 
             if (m.Msg == 0x0312 && m.WParam.ToInt32() == 0)
             {
-                InitializeCurrentScreen();
-
-                if (++indexOfLastMonitor >= Screen.AllScreens.Length)
-                    indexOfLastMonitor = 0;
-
+                int keyCode = m.LParam.ToInt32();
                 Rect activeWindowRect = new Rect();
                 IntPtr activeWindow = GetForegroundWindow();
+                if(activeWindow == this.Handle || GetParent(activeWindow) == this.Handle)
+                {
+                    base.WndProc(ref m);
+                    return;
+                }
                 GetWindowRect(activeWindow, ref activeWindowRect);
+                WINDOWPLACEMENT placement =  GetPlacement(activeWindow);
+                UpdateWindowsProfile(activeWindow, placement, activeWindowRect);
+                //F6
+                if (keyCode == 0x00750000)
+                {
+                    DealWithF6(activeWindow, activeWindowRect);
+                }
+                //F7
+                else if (keyCode == 0x00760000)
+                {
+                    DealWithF7(activeWindow, activeWindowRect);
 
-                Point newLocation = Screen.AllScreens[indexOfLastMonitor].WorkingArea.Location;
-                newLocation.Y = activeWindowRect.Y;
+                }
+                //F8
+                else if (keyCode == 0x00770000)
+                {
+                    DealWithF8(activeWindow, activeWindowRect);
 
-                //! Hack-alert: For some reason GetWindowRect() always returns -8 for position X for full-size applications...
-                if (activeWindowRect.X < -8)
-                    newLocation.X = Screen.AllScreens[indexOfLastMonitor].Bounds.Width - (activeWindowRect.X * -1);
-                else
-                    newLocation.X += activeWindowRect.X;
+                }
+                //F9
+                else if (keyCode == 0x00780000)
+                {
+                    DealWithF9(activeWindow, activeWindowRect);
 
-                SetWindowPos(activeWindow, (IntPtr)0, newLocation.X, newLocation.Y, Screen.AllScreens[indexOfLastMonitor].Bounds.Width, Screen.AllScreens[indexOfLastMonitor].Bounds.Height, 0x0040 | 0x0001);
+                }
+                //F10
+                else if (keyCode == 0x00790000)
+                {
+                    DealWithF10(activeWindow, activeWindowRect);
+                }
+
+               
+             
             }
 
             base.WndProc(ref m);
@@ -167,40 +449,56 @@ namespace ApplicationMover
             MinimizeAndHideSettingsForm();
         }
 
-        private void buttonSave_Click(object sender, EventArgs e)
-        {
-            SaveSettings();
-            Close();
-        }
-
         private void SaveSettings()
         {
-            Settings.Default.ShortcutKeyIndex = comboBoxMoveWindowShortcuts.SelectedIndex;
-            Settings.Default.Save();
-
             UnregisterHotKey(this.Handle, 0);
-            RegisterHotKey(this.Handle, 0, 0, GetShortcutKey().GetHashCode());
+            RegisterHotKey(this.Handle, 0, 0, Keys.F6.GetHashCode());
+            RegisterHotKey(this.Handle, 0, 0, Keys.F7.GetHashCode());
+            RegisterHotKey(this.Handle, 0, 0, Keys.F8.GetHashCode());
+            RegisterHotKey(this.Handle, 0, 0, Keys.F9.GetHashCode());
+            RegisterHotKey(this.Handle, 0, 0, Keys.F10.GetHashCode());
         }
 
-        private Keys GetShortcutKey()
+        private void label1_Click(object sender, EventArgs e)
         {
-            switch (comboBoxMoveWindowShortcuts.SelectedIndex)
-            {
-                case 0: return Keys.F1;
-                case 1: return Keys.F2;
-                case 2: return Keys.F3;
-                case 3: return Keys.F4;
-                case 4: return Keys.F5;
-                case 5: return Keys.F6;
-                case 6: return Keys.F7;
-                case 7: return Keys.F8;
-                case 8: return Keys.F9;
-                case 9: return Keys.F10;
-                case 10: return Keys.F11;
-                case 11: return Keys.F12;
-            }
+            MessageBox.Show("别点了没用");
+        }
 
-            return Keys.F6;
+        private void label4_Click(object sender, EventArgs e)
+        {
+            label1_Click(sender, e);
+        }
+
+        private void label3_Click(object sender, EventArgs e)
+        {
+            label1_Click(sender, e);
+        }
+
+        private void label2_Click(object sender, EventArgs e)
+        {
+            label1_Click(sender, e);
+        }
+
+        private void label5_Click(object sender, EventArgs e)
+        {
+            label1_Click(sender, e);
+        }
+
+        private void button1_Click(object sender, EventArgs e)
+        {
+            positionMap.Clear();
+            currentStateMap.Clear();
+            MessageBox.Show("清理成功！！！");
+        }
+
+        private void button3_Click(object sender, EventArgs e)
+        {
+            MinimizeAndHideSettingsForm();
+        }
+
+        private void button2_Click(object sender, EventArgs e)
+        {
+            OnMenuItemExitClicked(sender, e);
         }
     }
 }

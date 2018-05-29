@@ -8,9 +8,9 @@ using System.Runtime.InteropServices;
 [assembly: AssemblyTitle("ApplicationMover")]
 [assembly: AssemblyDescription("")]
 [assembly: AssemblyConfiguration("")]
-[assembly: AssemblyCompany("Hewlett-Packard Company")]
+[assembly: AssemblyCompany("FineReport")]
 [assembly: AssemblyProduct("ApplicationMover")]
-[assembly: AssemblyCopyright("Copyright © Hewlett-Packard Company 2013")]
+[assembly: AssemblyCopyright("FineReport")]
 [assembly: AssemblyTrademark("")]
 [assembly: AssemblyCulture("")]
 
